@@ -83,13 +83,25 @@ services:
           name: ditrine-api
           property: host
       - key: NEXT_PUBLIC_MARKET_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-market
+          property: host
       - key: NEXT_PUBLIC_SUPPLY_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-supply
+          property: host
       - key: NEXT_PUBLIC_STREAM_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-stream
+          property: host
       - key: NEXT_PUBLIC_CONTROL_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-control
+          property: host
 
   - type: web
     name: ditrine-market
@@ -105,13 +117,25 @@ services:
           name: ditrine-api
           property: host
       - key: NEXT_PUBLIC_PULSE_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-pulse
+          property: host
       - key: NEXT_PUBLIC_SUPPLY_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-supply
+          property: host
       - key: NEXT_PUBLIC_STREAM_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-stream
+          property: host
       - key: NEXT_PUBLIC_CONTROL_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-control
+          property: host
 
   - type: web
     name: ditrine-supply
@@ -127,13 +151,25 @@ services:
           name: ditrine-api
           property: host
       - key: NEXT_PUBLIC_PULSE_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-pulse
+          property: host
       - key: NEXT_PUBLIC_MARKET_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-market
+          property: host
       - key: NEXT_PUBLIC_STREAM_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-stream
+          property: host
       - key: NEXT_PUBLIC_CONTROL_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-control
+          property: host
 
   - type: web
     name: ditrine-stream
@@ -149,13 +185,25 @@ services:
           name: ditrine-api
           property: host
       - key: NEXT_PUBLIC_PULSE_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-pulse
+          property: host
       - key: NEXT_PUBLIC_MARKET_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-market
+          property: host
       - key: NEXT_PUBLIC_SUPPLY_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-supply
+          property: host
       - key: NEXT_PUBLIC_CONTROL_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-control
+          property: host
 
   - type: web
     name: ditrine-control
@@ -171,10 +219,22 @@ services:
           name: ditrine-api
           property: host
       - key: NEXT_PUBLIC_PULSE_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-pulse
+          property: host
       - key: NEXT_PUBLIC_MARKET_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-market
+          property: host
       - key: NEXT_PUBLIC_SUPPLY_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-supply
+          property: host
       - key: NEXT_PUBLIC_STREAM_URL
-        sync: false
+        fromService:
+          type: web
+          name: ditrine-stream
+          property: host

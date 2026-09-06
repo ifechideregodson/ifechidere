@@ -1,8 +1,10 @@
 import PulseWorkspace from "./pulse-workspace";
 
-const marketUrl = process.env.NEXT_PUBLIC_MARKET_URL ?? "http://localhost:3002";
-const supplyUrl = process.env.NEXT_PUBLIC_SUPPLY_URL ?? "http://localhost:3003";
-const streamUrl = process.env.NEXT_PUBLIC_STREAM_URL ?? "http://localhost:3004";
-const controlUrl = process.env.NEXT_PUBLIC_CONTROL_URL ?? "http://localhost:3005";
+const publicUrl = (value: string | undefined, fallback: string) => value?.startsWith("http") ? value : value ? `https://${value}` : fallback;
+
+const marketUrl = publicUrl(process.env.NEXT_PUBLIC_MARKET_URL, "http://localhost:3002");
+const supplyUrl = publicUrl(process.env.NEXT_PUBLIC_SUPPLY_URL, "http://localhost:3003");
+const streamUrl = publicUrl(process.env.NEXT_PUBLIC_STREAM_URL, "http://localhost:3004");
+const controlUrl = publicUrl(process.env.NEXT_PUBLIC_CONTROL_URL, "http://localhost:3005");
 const cards = [["Share an update", "Publish your next idea, milestone, or question.", "Start writing"], ["Portfolio", "Your public profile is 84% ready.", "Open portfolio"], ["Network", "12 new people are waiting to connect.", "View activity"]];
 export default function Pulse() { return <main className="site pulse"><header><a className="brand" href="/">Ditrine <b>/ Pulse</b></a><nav><a href={marketUrl}>Market</a><a href={supplyUrl}>Supply</a><a href={streamUrl}>Stream</a><a href={controlUrl}>Control</a></nav><span className="avatar">AM</span></header><section className="hero"><div><small>01 / PROFESSIONAL NETWORK</small><h1>Make your work <i>visible.</i></h1><p>Publish updates, shape a living portfolio, and find the people and opportunities that move your work forward.</p><button>Share an update <span>↗</span></button></div><div className="orb">P</div></section><section className="grid">{cards.map(([title, text, action]) => <article key={title}><small>{title}</small><h2>{text}</h2><a href="#">{action} ↗</a></article>)}</section><PulseWorkspace /></main>; }

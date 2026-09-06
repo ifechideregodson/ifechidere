@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:10000";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL?.startsWith("http") ? process.env.NEXT_PUBLIC_API_URL : process.env.NEXT_PUBLIC_API_URL ? `https://${process.env.NEXT_PUBLIC_API_URL}` : "http://localhost:10000";
 type Product = { id: string; sku: string; name: string; description: string; price_cents: number; inventory_count: number };
 
 export default function SupplyWorkspace() {

@@ -1,0 +1,43 @@
+{
+  "name": "detrine",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "npm run dev:pulse",
+    "dev:pulse": "npm --workspace apps/pulse run dev",
+    "dev:market": "npm --workspace apps/market run dev",
+    "dev:supply": "npm --workspace apps/supply run dev",
+    "dev:stream": "npm --workspace apps/stream run dev",
+    "dev:control": "npm --workspace apps/control run dev",
+    "build": "npm run build:all",
+    "build:all": "npm run build:pulse && npm run build:market && npm run build:supply && npm run build:stream && npm run build:control",
+    "build:pulse": "npm --workspace apps/pulse run build",
+    "build:market": "npm --workspace apps/market run build",
+    "build:supply": "npm --workspace apps/supply run build",
+    "build:stream": "npm --workspace apps/stream run build",
+    "build:control": "npm --workspace apps/control run build",
+    "lint": "npm run lint:all",
+    "lint:all": "npm run lint:pulse && npm run lint:market && npm run lint:supply && npm run lint:stream && npm run lint:control",
+    "lint:pulse": "npm --workspace apps/pulse run lint",
+    "lint:market": "npm --workspace apps/market run lint",
+    "lint:supply": "npm --workspace apps/supply run lint",
+    "lint:stream": "npm --workspace apps/stream run lint",
+    "lint:control": "npm --workspace apps/control run lint"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

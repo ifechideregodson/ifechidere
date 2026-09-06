@@ -1,0 +1,39 @@
+create extension if not exists pgcrypto;
+
+create type user_role as enum ('user', 'worker', 'executive');
+create type user_status as enum ('invited', 'active', 'suspended', 'deleted');
+create type order_status as enum ('pending', 'paid', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded');
+create type listing_status as enum ('draft', 'published', 'paused', 'sold', 'archived');
+create type moderation_status as enum ('open', 'reviewing', 'resolved', 'dismissed');
+create type trade_side as enum ('buy', 'sell');
+create type trade_status as enum ('pending', 'filled', 'cancelled', 'failed');
+
+create table if not exists users (id uuid primary key default gen_random_uuid(), email text not null unique, display_name text not null, password_hash text, role user_role not null default 'user', status user_status not null default 'invited', avatar_url text, last_seen_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists organizations (id uuid primary key default gen_random_uuid(), name text not null, slug text not null unique, owner_id uuid references users(id), created_at timestamptz not null default now());
+create table if not exists organization_members (organization_id uuid references organizations(id) on delete cascade, user_id uuid references users(id) on delete cascade, role text not null default 'member', created_at timestamptz not null default now(), primary key (organization_id, user_id));
+create table if not exists portfolios (id uuid primary key default gen_random_uuid(), owner_id uuid not null references users(id), title text not null, slug text not null unique, bio text, is_published boolean not null default false, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists portfolio_items (id uuid primary key default gen_random_uuid(), portfolio_id uuid not null references portfolios(id) on delete cascade, title text not null, description text, asset_url text, sort_order integer not null default 0, created_at timestamptz not null default now());
+create table if not exists posts (id uuid primary key default gen_random_uuid(), author_id uuid not null references users(id), body text not null, media_url text, visibility text not null default 'public', created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists listings (id uuid primary key default gen_random_uuid(), seller_id uuid not null references users(id), title text not null, description text not null, listing_type text not null, price_cents integer not null default 0, currency char(3) not null default 'USD', status listing_status not null default 'draft', created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists orders (id uuid primary key default gen_random_uuid(), buyer_id uuid not null references users(id), seller_id uuid references users(id), status order_status not null default 'pending', total_cents integer not null, currency char(3) not null default 'USD', shipping_address jsonb, payment_provider text, payment_reference text, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists order_items (id uuid primary key default gen_random_uuid(), order_id uuid not null references orders(id) on delete cascade, listing_id uuid references listings(id), product_name text not null, quantity integer not null check (quantity > 0), unit_price_cents integer not null);
+create table if not exists products (id uuid primary key default gen_random_uuid(), sku text not null unique, name text not null, description text not null, price_cents integer not null, inventory_count integer not null default 0, is_active boolean not null default true, created_at timestamptz not null default now());
+create table if not exists shipments (id uuid primary key default gen_random_uuid(), order_id uuid not null unique references orders(id) on delete cascade, carrier text, tracking_number text, status text not null default 'pending', estimated_delivery date, shipped_at timestamptz, delivered_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists crypto_assets (id uuid primary key default gen_random_uuid(), symbol text not null unique, name text not null, network text, is_active boolean not null default true, created_at timestamptz not null default now());
+create table if not exists wallets (id uuid primary key default gen_random_uuid(), user_id uuid not null references users(id) on delete cascade, provider text not null, provider_wallet_id text not null, status text not null default 'pending', created_at timestamptz not null default now(), unique (provider, provider_wallet_id));
+create table if not exists crypto_trades (id uuid primary key default gen_random_uuid(), user_id uuid not null references users(id), asset_id uuid not null references crypto_assets(id), side trade_side not null, quantity numeric(30, 12) not null check (quantity > 0), quote_currency char(3) not null default 'USD', unit_price_cents integer not null, status trade_status not null default 'pending', provider text, provider_reference text, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists channels (id uuid primary key default gen_random_uuid(), owner_id uuid not null references users(id), name text not null, slug text not null unique, description text, is_published boolean not null default false, created_at timestamptz not null default now());
+create table if not exists videos (id uuid primary key default gen_random_uuid(), channel_id uuid not null references channels(id) on delete cascade, title text not null, description text, video_url text not null, thumbnail_url text, duration_seconds integer, status text not null default 'processing', published_at timestamptz, created_at timestamptz not null default now());
+create table if not exists video_views (id uuid primary key default gen_random_uuid(), video_id uuid not null references videos(id) on delete cascade, viewer_id uuid references users(id) on delete set null, watch_seconds integer not null default 0, created_at timestamptz not null default now());
+create table if not exists moderation_cases (id uuid primary key default gen_random_uuid(), reporter_id uuid references users(id), subject_type text not null, subject_id uuid not null, reason text not null, status moderation_status not null default 'open', assigned_to uuid references users(id), resolution text, created_at timestamptz not null default now(), resolved_at timestamptz);
+create table if not exists audit_events (id uuid primary key default gen_random_uuid(), actor_id uuid references users(id), action text not null, entity_type text not null, entity_id uuid, metadata jsonb not null default '{}', created_at timestamptz not null default now());
+
+create index if not exists idx_posts_author_created on posts(author_id, created_at desc);
+create index if not exists idx_listings_status on listings(status);
+create index if not exists idx_orders_status on orders(status);
+create index if not exists idx_shipments_status on shipments(status);
+create index if not exists idx_crypto_trades_user_created on crypto_trades(user_id, created_at desc);
+create index if not exists idx_videos_channel_created on videos(channel_id, created_at desc);
+create index if not exists idx_video_views_video_created on video_views(video_id, created_at desc);
+create index if not exists idx_moderation_status on moderation_cases(status);
+create index if not exists idx_audit_created on audit_events(created_at desc);

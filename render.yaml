@@ -1,0 +1,122 @@
+services:
+  - type: web
+    name: ditrine-api
+    runtime: node
+    rootDir: services/api
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: NODE_ENV
+        value: production
+
+  - type: web
+    name: ditrine-pulse
+    runtime: node
+    rootDir: apps/pulse
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: ditrine-api
+          property: host
+      - key: NEXT_PUBLIC_MARKET_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPPLY_URL
+        sync: false
+      - key: NEXT_PUBLIC_STREAM_URL
+        sync: false
+      - key: NEXT_PUBLIC_CONTROL_URL
+        sync: false
+
+  - type: web
+    name: ditrine-market
+    runtime: node
+    rootDir: apps/market
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: ditrine-api
+          property: host
+      - key: NEXT_PUBLIC_PULSE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPPLY_URL
+        sync: false
+      - key: NEXT_PUBLIC_STREAM_URL
+        sync: false
+      - key: NEXT_PUBLIC_CONTROL_URL
+        sync: false
+
+  - type: web
+    name: ditrine-supply
+    runtime: node
+    rootDir: apps/supply
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: ditrine-api
+          property: host
+      - key: NEXT_PUBLIC_PULSE_URL
+        sync: false
+      - key: NEXT_PUBLIC_MARKET_URL
+        sync: false
+      - key: NEXT_PUBLIC_STREAM_URL
+        sync: false
+      - key: NEXT_PUBLIC_CONTROL_URL
+        sync: false
+
+  - type: web
+    name: ditrine-stream
+    runtime: node
+    rootDir: apps/stream
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: ditrine-api
+          property: host
+      - key: NEXT_PUBLIC_PULSE_URL
+        sync: false
+      - key: NEXT_PUBLIC_MARKET_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPPLY_URL
+        sync: false
+      - key: NEXT_PUBLIC_CONTROL_URL
+        sync: false
+
+  - type: web
+    name: ditrine-control
+    runtime: node
+    rootDir: apps/control
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: ditrine-api
+          property: host
+      - key: NEXT_PUBLIC_PULSE_URL
+        sync: false
+      - key: NEXT_PUBLIC_MARKET_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPPLY_URL
+        sync: false
+      - key: NEXT_PUBLIC_STREAM_URL
+        sync: false

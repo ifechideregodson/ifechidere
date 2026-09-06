@@ -1,0 +1,34 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:10000";
+const apiUrl = configuredApiUrl.startsWith("http") ? configuredApiUrl : `https://${configuredApiUrl}`;
+const spaces = [["Pulse", "Professional network", process.env.NEXT_PUBLIC_PULSE_URL ?? "http://localhost:3001"], ["Market", "Goods and services", process.env.NEXT_PUBLIC_MARKET_URL ?? "http://localhost:3002"], ["Supply", "Company store", process.env.NEXT_PUBLIC_SUPPLY_URL ?? "http://localhost:3003"], ["Stream", "Video platform", process.env.NEXT_PUBLIC_STREAM_URL ?? "http://localhost:3004"]] as const;
+type Summary = { active_users: number; open_orders: number; open_reviews: number; events_today: number };
+type Row = Record<string, string | number | null>;
+
+export default function ControlDashboard() {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [users, setUsers] = useState<Row[]>([]);
+  const [orders, setOrders] = useState<Row[]>([]);
+  const [cases, setCases] = useState<Row[]>([]);
+  const [audit, setAudit] = useState<Row[]>([]);
+  const [token, setToken] = useState("");
+  const [workerName, setWorkerName] = useState("");
+  const [workerEmail, setWorkerEmail] = useState("");
+  const [message, setMessage] = useState("Connect an executive token to manage operations.");
+  const [apiStatus, setApiStatus] = useState("Checking API");
+
+  useEffect(() => { const saved = window.localStorage.getItem("ditrine_access_token") ?? ""; setToken(saved); void checkHealth(); if (saved) void loadOperations(saved); }, []);
+  async function checkHealth() { try { const response = await fetch(`${apiUrl}/health`); if (!response.ok) throw new Error(); setApiStatus("API healthy"); } catch { setApiStatus("API unavailable"); } }
+  async function request(path: string, options?: RequestInit) { return fetch(`${apiUrl}${path}`, { ...options, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(options?.headers ?? {}) } }); }
+  async function loadOperations(currentToken = token) { const headers = { Authorization: `Bearer ${currentToken}` }; const responses = await Promise.all([fetch(`${apiUrl}/v1/summary`, { headers }), fetch(`${apiUrl}/v1/admin/users`, { headers }), fetch(`${apiUrl}/v1/admin/orders`, { headers }), fetch(`${apiUrl}/v1/admin/moderation`, { headers }), fetch(`${apiUrl}/v1/audit-events`, { headers })]); if (responses.every((response) => response.ok)) { setSummary(await responses[0].json()); setUsers(await responses[1].json()); setOrders(await responses[2].json()); setCases(await responses[3].json()); setAudit(await responses[4].json()); setMessage("Operations data refreshed."); } else setMessage("Your token does not have staff access."); }
+  function connect(event: FormEvent<HTMLFormElement>) { event.preventDefault(); window.localStorage.setItem("ditrine_access_token", token); void loadOperations(); }
+  async function inviteWorker(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const response = await request("/v1/workers", { method: "POST", body: JSON.stringify({ displayName: workerName, email: workerEmail }) }); setMessage(response.ok ? "Worker invitation created." : "Worker invitation failed."); if (response.ok) { setWorkerName(""); setWorkerEmail(""); void loadOperations(); } }
+  async function updateOrder(orderId: string, status: string) { const response = await request(`/v1/admin/orders/${orderId}`, { method: "PATCH", body: JSON.stringify({ status }) }); setMessage(response.ok ? "Order updated." : "Order update failed."); if (response.ok) void loadOperations(); }
+  async function resolveCase(caseId: string) { const response = await request(`/v1/admin/moderation/${caseId}`, { method: "PATCH", body: JSON.stringify({ status: "resolved", resolution: "Reviewed by operations" }) }); setMessage(response.ok ? "Moderation case resolved." : "Moderation update failed."); if (response.ok) void loadOperations(); }
+  const metrics = summary ? [["Active users", summary.active_users], ["Open orders", summary.open_orders], ["Open reviews", summary.open_reviews], ["Events today", summary.events_today]] : [["Active users", "--"], ["Open orders", "--"], ["Open reviews", "--"], ["Events today", "--"]];
+
+  return <><section className="ops-status"><span className="status-dot" /> {apiStatus}<span className="ops-label">Control plane</span></section><form className="control-connect" onSubmit={connect}><input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Executive or worker JWT" /><button type="submit">Connect and refresh</button><span>{message}</span></form><section className="metrics">{metrics.map(([label, value]) => <article key={label}><small>{label}</small><strong>{value}</strong></article>)}</section><section className="space-links"><div className="ops-heading"><small>Managed websites</small><h2>One view.<br /><i>Every surface.</i></h2></div><div className="managed-grid">{spaces.map(([name, detail, url]) => <a href={url} key={name}><span>{name}</span><small>{detail}</small><b>↗</b></a>)}</div></section><section className="admin-grid"><form className="admin-panel" onSubmit={inviteWorker}><small>Add a worker</small><h3>Grow the team.</h3><input value={workerName} onChange={(event) => setWorkerName(event.target.value)} placeholder="Full name" required /><input value={workerEmail} onChange={(event) => setWorkerEmail(event.target.value)} placeholder="Work email" type="email" required /><button type="submit">Invite worker ↗</button></form><section className="admin-panel"><small>People</small><h3>{users.length} accounts</h3>{users.slice(0, 5).map((user) => <p className="admin-row" key={String(user.id)}><strong>{String(user.display_name)}</strong><span>{String(user.role)} · {String(user.status)}</span></p>)}</section><section className="admin-panel"><small>Orders</small><h3>{orders.length} recent orders</h3>{orders.slice(0, 5).map((order) => <p className="admin-row" key={String(order.id)}><strong>#{String(order.id).slice(0, 8)}</strong><button onClick={() => void updateOrder(String(order.id), "processing")} type="button">Process</button></p>)}</section><section className="admin-panel"><small>Trust and safety</small><h3>{cases.length} cases</h3>{cases.slice(0, 5).map((item) => <p className="admin-row" key={String(item.id)}><strong>{String(item.subject_type)}</strong><button onClick={() => void resolveCase(String(item.id))} type="button">Resolve</button></p>)}</section></section><section className="audit-panel"><small>Recent audit activity</small>{audit.slice(0, 8).map((event) => <p className="admin-row" key={String(event.id)}><strong>{String(event.action)}</strong><span>{String(event.entity_type)} · {String(event.created_at)}</span></p>)}</section></>;
+}

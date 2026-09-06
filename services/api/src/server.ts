@@ -73,10 +73,26 @@ app.get("/v1/portfolios/me", requireAuth, async (request: AuthRequest, response)
 });
 
 app.post("/v1/portfolios", requireAuth, async (request: AuthRequest, response) => {
-  const { title, slug, bio } = request.body as { title?: string; slug?: string; bio?: string };
+  const { title, slug, bio, isPublished = true } = request.body as { title?: string; slug?: string; bio?: string; isPublished?: boolean };
   if (!title?.trim() || !slug?.trim()) return response.status(400).json({ error: "title and slug are required" });
-  const result = await pool.query("insert into portfolios (owner_id, title, slug, bio) values ($1, $2, $3, $4) returning id, title, slug, bio, is_published, updated_at", [request.actor?.id, title.trim(), slug.trim().toLowerCase(), bio?.trim() ?? null]);
+  const result = await pool.query("insert into portfolios (owner_id, title, slug, bio, is_published) values ($1, $2, $3, $4, $5) returning id, title, slug, bio, is_published, updated_at", [request.actor?.id, title.trim(), slug.trim().toLowerCase(), bio?.trim() ?? null, isPublished]);
   await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id) values ($1, 'portfolio.created', 'portfolio', $2)", [request.actor?.id, result.rows[0].id]);
+  response.status(201).json(result.rows[0]);
+});
+
+app.get("/v1/portfolios/:slug", async (request, response) => {
+  const result = await pool.query("select p.id, p.title, p.slug, p.bio, p.updated_at, u.display_name as owner_name, u.avatar_url, coalesce(json_agg(json_build_object('id', i.id, 'title', i.title, 'description', i.description, 'assetUrl', i.asset_url, 'sortOrder', i.sort_order) order by i.sort_order) filter (where i.id is not null), '[]') as items from portfolios p join users u on u.id = p.owner_id left join portfolio_items i on i.portfolio_id = p.id where p.slug = $1 and p.is_published = true group by p.id, u.display_name, u.avatar_url", [request.params.slug]);
+  if (!result.rowCount) return response.status(404).json({ error: "Published portfolio not found" });
+  response.json(result.rows[0]);
+});
+
+app.post("/v1/portfolios/:portfolioId/items", requireAuth, async (request: AuthRequest, response) => {
+  const { title, description, assetUrl, sortOrder = 0 } = request.body as { title?: string; description?: string; assetUrl?: string; sortOrder?: number };
+  if (!title?.trim() || !Number.isInteger(sortOrder) || sortOrder < 0) return response.status(400).json({ error: "title and a non-negative integer sortOrder are required" });
+  const ownership = await pool.query("select id from portfolios where id = $1 and owner_id = $2", [request.params.portfolioId, request.actor?.id]);
+  if (!ownership.rowCount) return response.status(403).json({ error: "You do not own this portfolio" });
+  const result = await pool.query("insert into portfolio_items (portfolio_id, title, description, asset_url, sort_order) values ($1, $2, $3, $4, $5) returning id, title, description, asset_url, sort_order", [request.params.portfolioId, title.trim(), description?.trim() ?? null, assetUrl ?? null, sortOrder]);
+  await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id) values ($1, 'portfolio-item.created', 'portfolio_item', $2)", [request.actor?.id, result.rows[0].id]);
   response.status(201).json(result.rows[0]);
 });
 

@@ -9,7 +9,7 @@ export function coinbaseProviderStatus() { return { provider: keyName && private
 async function createToken(method: string, path: string) {
   if (!keyName || !privateKey) throw new Error("Coinbase is not configured");
   const key = crypto.createPrivateKey(privateKey);
-  return new SignJWT({}).setProtectedHeader({ alg: "ES256", kid: keyName, nonce: crypto.randomUUID() }).setIssuer("cdp").setSubject(keyName).setAudience(["retail_rest_api"]).setExpirationTime("2m").setIssuedAt().setClaim("uri", `${method} api.coinbase.com${path}`).sign(key);
+  return new SignJWT({ uri: `${method} api.coinbase.com${path}` }).setProtectedHeader({ alg: "ES256", kid: keyName, nonce: crypto.randomUUID() }).setIssuer("cdp").setSubject(keyName).setAudience(["retail_rest_api"]).setExpirationTime("2m").setIssuedAt().sign(key);
 }
 
 export async function createCoinbaseMarketOrder(input: { symbol: string; side: "buy" | "sell"; quantity: number; quoteCurrency: string }) {

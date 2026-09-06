@@ -35,10 +35,15 @@ async function markOrderPaid(orderId: string, provider: string, reference?: stri
   await pool.query("insert into audit_events (action, entity_type, entity_id, metadata) values ('payment.completed', 'order', $1, $2)", [orderId, JSON.stringify({ provider, reference })]);
 }
 
+function headerValue(request: Request, name: string) {
+  const value = request.headers[name];
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
 app.use(helmet());
 app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
 app.post("/v1/payments/stripe-webhook", express.raw({ type: "application/json" }), async (request, response) => {
-  if (!stripeWebhookSecret || !verifyStripeSignature(request.body as Buffer, request.headers["stripe-signature"] ?? "", stripeWebhookSecret)) return response.status(400).json({ error: "Invalid Stripe signature" });
+  if (!stripeWebhookSecret || !verifyStripeSignature(request.body as Buffer, headerValue(request, "stripe-signature"), stripeWebhookSecret)) return response.status(400).json({ error: "Invalid Stripe signature" });
   const event = JSON.parse((request.body as Buffer).toString("utf8")) as { id?: string; type?: string; data?: { object?: { metadata?: { order_id?: string }; payment_status?: string } } };
   const orderId = event.data?.object?.metadata?.order_id;
   if (event.type === "checkout.session.completed" && orderId && event.data?.object?.payment_status === "paid") {
@@ -49,7 +54,7 @@ app.post("/v1/payments/stripe-webhook", express.raw({ type: "application/json" }
   response.json({ received: true });
 });
 app.post("/v1/payments/paystack-webhook", express.raw({ type: "application/json" }), async (request, response) => {
-  if (!verifyPaystackSignature(request.body as Buffer, request.headers["x-paystack-signature"] ?? "")) return response.status(400).json({ error: "Invalid Paystack signature" });
+  if (!verifyPaystackSignature(request.body as Buffer, headerValue(request, "x-paystack-signature"))) return response.status(400).json({ error: "Invalid Paystack signature" });
   const event = JSON.parse((request.body as Buffer).toString("utf8")) as { event?: string; data?: { status?: string; reference?: string; metadata?: { order_id?: string } } };
   const orderId = event.data?.metadata?.order_id;
   if (event.event === "charge.success" && event.data?.status === "success" && orderId) await markOrderPaid(orderId, "paystack", event.data.reference);

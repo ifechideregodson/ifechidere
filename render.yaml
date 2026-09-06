@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: services/api
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
     envVars:
@@ -74,7 +74,7 @@ services:
     runtime: node
     plan: free
     rootDir: apps/pulse
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
@@ -108,7 +108,7 @@ services:
     runtime: node
     plan: free
     rootDir: apps/market
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
@@ -142,7 +142,7 @@ services:
     runtime: node
     plan: free
     rootDir: apps/supply
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
@@ -176,7 +176,7 @@ services:
     runtime: node
     plan: free
     rootDir: apps/stream
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
@@ -210,7 +210,7 @@ services:
     runtime: node
     plan: free
     rootDir: apps/control
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL

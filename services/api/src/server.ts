@@ -171,7 +171,7 @@ app.get("/v1/listings", async (request, response) => {
 
 app.post("/v1/listings", requireAuth, async (request: AuthRequest, response) => {
   const { title, description, listingType = "goods", priceCents, currency = "USD" } = request.body as { title?: string; description?: string; listingType?: string; priceCents?: number; currency?: string };
-  if (!title?.trim() || !description?.trim() || !Number.isInteger(priceCents) || priceCents < 0 || !/^[A-Z]{3}$/.test(currency)) return response.status(400).json({ error: "title, description, integer priceCents, and three-letter currency are required" });
+  if (!title?.trim() || !description?.trim() || typeof priceCents !== "number" || !Number.isInteger(priceCents) || priceCents < 0 || !/^[A-Z]{3}$/.test(currency)) return response.status(400).json({ error: "title, description, integer priceCents, and three-letter currency are required" });
   const result = await pool.query("insert into listings (seller_id, title, description, listing_type, price_cents, currency, status) values ($1, $2, $3, $4, $5, $6, 'published') returning id, title, description, listing_type, price_cents, currency, status, created_at", [request.actor?.id, title.trim(), description.trim(), listingType, priceCents, currency]);
   await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id) values ($1, 'listing.created', 'listing', $2)", [request.actor?.id, result.rows[0].id]);
   response.status(201).json(result.rows[0]);
@@ -215,7 +215,7 @@ app.get("/v1/products", async (_request, response) => {
 
 app.post("/v1/products", requireAuth, requireExecutive, async (request: AuthRequest, response) => {
   const { sku, name, description, priceCents, inventoryCount = 0 } = request.body as { sku?: string; name?: string; description?: string; priceCents?: number; inventoryCount?: number };
-  if (!sku?.trim() || !name?.trim() || !description?.trim() || !Number.isInteger(priceCents) || priceCents < 0 || !Number.isInteger(inventoryCount) || inventoryCount < 0) return response.status(400).json({ error: "sku, name, description, integer priceCents, and non-negative inventoryCount are required" });
+  if (!sku?.trim() || !name?.trim() || !description?.trim() || typeof priceCents !== "number" || !Number.isInteger(priceCents) || priceCents < 0 || !Number.isInteger(inventoryCount) || inventoryCount < 0) return response.status(400).json({ error: "sku, name, description, integer priceCents, and non-negative inventoryCount are required" });
   const result = await pool.query("insert into products (sku, name, description, price_cents, inventory_count) values ($1, $2, $3, $4, $5) returning id, sku, name, description, price_cents, inventory_count, is_active", [sku.trim(), name.trim(), description.trim(), priceCents, inventoryCount]);
   await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id) values ($1, 'product.created', 'product', $2)", [request.actor?.id, result.rows[0].id]);
   response.status(201).json(result.rows[0]);

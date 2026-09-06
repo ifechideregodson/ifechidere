@@ -191,6 +191,26 @@ app.get("/v1/channels/:channelId/analytics", requireAuth, async (request: AuthRe
   response.json(result.rows);
 });
 
+app.get("/v1/crypto/assets", async (_request, response) => {
+  const result = await pool.query("select id, symbol, name, network from crypto_assets where is_active = true order by symbol");
+  response.json(result.rows);
+});
+
+app.get("/v1/crypto/trades", requireAuth, async (request: AuthRequest, response) => {
+  const result = await pool.query("select t.id, a.symbol, a.name, t.side, t.quantity, t.quote_currency, t.unit_price_cents, t.status, t.provider, t.provider_reference, t.created_at from crypto_trades t join crypto_assets a on a.id = t.asset_id where t.user_id = $1 order by t.created_at desc limit 100", [request.actor?.id]);
+  response.json(result.rows);
+});
+
+app.post("/v1/crypto/trades", requireAuth, async (request: AuthRequest, response) => {
+  const { assetId, side, quantity, quoteCurrency = "USD" } = request.body as { assetId?: string; side?: "buy" | "sell"; quantity?: number; quoteCurrency?: string };
+  if (!assetId || !["buy", "sell"].includes(side ?? "") || typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0 || !/^[A-Z]{3}$/.test(quoteCurrency)) return response.status(400).json({ error: "assetId, buy or sell side, positive quantity, and three-letter quote currency are required" });
+  const asset = await pool.query("select id from crypto_assets where id = $1 and is_active = true", [assetId]);
+  if (!asset.rowCount) return response.status(404).json({ error: "Crypto asset not found" });
+  const result = await pool.query("insert into crypto_trades (user_id, asset_id, side, quantity, quote_currency, unit_price_cents, status, provider) values ($1, $2, $3, $4, $5, 0, 'pending', 'unconfigured') returning id, asset_id, side, quantity, quote_currency, status, created_at", [request.actor?.id, assetId, side, quantity, quoteCurrency]);
+  await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id, metadata) values ($1, 'crypto-trade.requested', 'crypto_trade', $2, $3)", [request.actor?.id, result.rows[0].id, JSON.stringify({ assetId, side, quantity, quoteCurrency })]);
+  response.status(201).json({ ...result.rows[0], message: "Trade intent recorded; connect a regulated exchange provider before execution." });
+});
+
 app.get("/v1/workers", requireAuth, requireStaff, async (_request, response) => {
   const result = await pool.query("select id, display_name, email, role, status, last_seen_at from users where role in ('executive', 'worker') order by display_name");
   response.json(result.rows);

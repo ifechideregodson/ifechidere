@@ -2,6 +2,7 @@ services:
   - type: web
     name: ditrine-api
     runtime: node
+    plan: free
     rootDir: services/api
     buildCommand: npm install && npm run build
     startCommand: npm start
@@ -71,6 +72,7 @@ services:
   - type: web
     name: ditrine-pulse
     runtime: node
+    plan: free
     rootDir: apps/pulse
     buildCommand: npm install && npm run build
     startCommand: npm start
@@ -92,6 +94,7 @@ services:
   - type: web
     name: ditrine-market
     runtime: node
+    plan: free
     rootDir: apps/market
     buildCommand: npm install && npm run build
     startCommand: npm start
@@ -113,6 +116,7 @@ services:
   - type: web
     name: ditrine-supply
     runtime: node
+    plan: free
     rootDir: apps/supply
     buildCommand: npm install && npm run build
     startCommand: npm start
@@ -134,6 +138,7 @@ services:
   - type: web
     name: ditrine-stream
     runtime: node
+    plan: free
     rootDir: apps/stream
     buildCommand: npm install && npm run build
     startCommand: npm start
@@ -155,6 +160,7 @@ services:
   - type: web
     name: ditrine-control
     runtime: node
+    plan: free
     rootDir: apps/control
     buildCommand: npm install && npm run build
     startCommand: npm start

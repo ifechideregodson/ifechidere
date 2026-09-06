@@ -34,8 +34,8 @@ The navigation inside each website points to the other applications by URL. They
 
 ## Render deployment
 
-Create a new Render Blueprint from this repository and select `render.yaml`. It creates five independent web services plus `ditrine-api`. Render will ask for `DATABASE_URL`, `CORS_ORIGINS`, and the public site URL variables. Set each URL to its final `https://...onrender.com` address after the services are created.
+Create a new Render Blueprint from this repository and select `render.yaml`. It creates six independent **Free** web services: five websites plus `ditrine-api`. Render will ask for `DATABASE_URL`, `CORS_ORIGINS`, and the public site URL variables. Set each URL to its final `https://...onrender.com` address after the services are created.
 
 Before deploying the API, run `db/schema.sql` in Retool Database and use the resulting connection string as `DATABASE_URL`. The API requires a real identity provider to mint JWTs; the Control console accepts a verified token in the `ditrine_access_token` browser storage key for the current integration.
 
-The API now includes Stripe Checkout/webhook handling and S3-compatible signed media uploads. Add the provider variables from `services/api/.env.example` to Render before using those flows. Crypto custody/exchange execution, video transcoding, email delivery, and identity-provider wiring still require provider credentials and business policy decisions before launch.
+The API now includes Stripe/Paystack/Flutterwave checkout handling and Cloudinary/S3-compatible signed media uploads. Add the provider variables from `services/api/.env.example` to Render before using those flows. Free Render web services sleep after inactivity, so the first request after sleeping can be slow and webhook delivery may need provider retry settings. Crypto custody/exchange execution, video transcoding, email delivery, and identity-provider wiring still require provider credentials and business policy decisions before launch.

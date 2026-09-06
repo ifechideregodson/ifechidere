@@ -1,8 +1,11 @@
+import crypto from "node:crypto";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import jwt from "jsonwebtoken";
 import pg from "pg";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createCheckoutSession, isStripeConfigured, verifyStripeSignature } from "./stripe.js";
 
 const { Pool } = pg;
@@ -17,6 +20,9 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const pool = new Pool({ connectionString: databaseUrl, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
 const origins = (process.env.CORS_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const mediaBucket = process.env.S3_BUCKET;
+const mediaPublicBaseUrl = process.env.MEDIA_PUBLIC_BASE_URL;
+const s3Client = process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY && mediaBucket ? new S3Client({ region: process.env.S3_REGION ?? "us-east-1", endpoint: process.env.S3_ENDPOINT, forcePathStyle: Boolean(process.env.S3_ENDPOINT), credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } }) : null;
 
 app.use(helmet());
 app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
@@ -78,6 +84,17 @@ app.post("/v1/posts", requireAuth, async (request: AuthRequest, response) => {
   const result = await pool.query("insert into posts (author_id, body, media_url, visibility) values ($1, $2, $3, $4) returning id, body, media_url, visibility, created_at", [request.actor?.id, body.trim(), mediaUrl ?? null, visibility]);
   await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id) values ($1, 'post.created', 'post', $2)", [request.actor?.id, result.rows[0].id]);
   response.status(201).json(result.rows[0]);
+});
+
+app.post("/v1/uploads/presign", requireAuth, async (request: AuthRequest, response) => {
+  const { fileName, contentType, purpose = "portfolio" } = request.body as { fileName?: string; contentType?: string; purpose?: "portfolio" | "video" | "avatar" };
+  if (!s3Client || !mediaBucket || !mediaPublicBaseUrl) return response.status(503).json({ error: "Media storage is not configured" });
+  if (!fileName?.trim() || !contentType || !["portfolio", "video", "avatar"].includes(purpose)) return response.status(400).json({ error: "fileName, contentType, and a valid purpose are required" });
+  if (!/^[a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+$/.test(contentType)) return response.status(400).json({ error: "Invalid content type" });
+  const safeName = fileName.trim().replace(/[^a-zA-Z0-9._-]/g, "-").slice(-120);
+  const key = `${purpose}/${request.actor?.id}/${crypto.randomUUID()}-${safeName}`;
+  const uploadUrl = await getSignedUrl(s3Client, new PutObjectCommand({ Bucket: mediaBucket, Key: key, ContentType: contentType }), { expiresIn: 900 });
+  response.json({ key, uploadUrl, publicUrl: `${mediaPublicBaseUrl.replace(/\/$/, "")}/${key}`, expiresIn: 900 });
 });
 
 app.get("/v1/portfolios/me", requireAuth, async (request: AuthRequest, response) => {

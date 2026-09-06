@@ -14,4 +14,6 @@ Do not put Stripe secret keys in any `NEXT_PUBLIC_*` variable or commit them to 
 
 ## Remaining providers
 
-Portfolio assets and videos currently accept URLs from external storage. Before launch, add a signed-upload provider such as S3/R2/Cloudinary and a video pipeline such as Mux/Cloudflare Stream. Crypto trade requests are persisted as pending intents and require a regulated exchange/custody integration before execution.
+OIDC authentication, Mux uploads, Coinbase Advanced Trade execution, and Resend invitations are now wired through the API. Configure their variables from `.env.example` and verify each provider's webhook, API scope, allowed origin, and production account before enabling real traffic.
+
+Portfolio files use the S3-compatible signed-upload flow documented in [MEDIA.md](MEDIA.md). Mux direct uploads return an upload URL through `POST /v1/videos/upload-url`; a production webhook should be added to update the corresponding video asset/playback ID after Mux finishes processing.

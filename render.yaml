@@ -29,6 +29,26 @@ services:
         sync: false
       - key: MEDIA_PUBLIC_BASE_URL
         sync: false
+      - key: OIDC_ISSUER_URL
+        sync: false
+      - key: OIDC_AUDIENCE
+        sync: false
+      - key: OIDC_ROLE_CLAIM
+        value: https://ditrine.com/role
+      - key: MUX_TOKEN_ID
+        sync: false
+      - key: MUX_TOKEN_SECRET
+        sync: false
+      - key: MUX_SIGNING_SECRET
+        sync: false
+      - key: COINBASE_API_KEY_NAME
+        sync: false
+      - key: COINBASE_API_PRIVATE_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
       - key: NODE_ENV
         value: production
 

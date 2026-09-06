@@ -2,19 +2,20 @@ import crypto from "node:crypto";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
-import jwt from "jsonwebtoken";
 import pg from "pg";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createCheckoutSession, isStripeConfigured, verifyStripeSignature } from "./stripe.js";
+import { authProviderStatus, verifyAccessToken } from "./providers-auth.js";
+import { coinbaseProviderStatus, createCoinbaseMarketOrder } from "./providers-coinbase.js";
+import { emailProviderStatus, sendTransactionalEmail } from "./providers-email.js";
+import { createMuxDirectUpload, muxProviderStatus } from "./providers-mux.js";
 
 const { Pool } = pg;
 const app = express();
 const port = Number(process.env.PORT ?? 10000);
-const jwtSecret = process.env.JWT_SECRET;
 const databaseUrl = process.env.DATABASE_URL;
 
-if (!jwtSecret) throw new Error("JWT_SECRET is required");
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
 const pool = new Pool({ connectionString: databaseUrl, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
@@ -42,12 +43,11 @@ app.use(express.json({ limit: "1mb" }));
 type Role = "executive" | "worker" | "user";
 type AuthRequest = Request & { actor?: { id: string; role: Role } };
 
-function requireAuth(request: AuthRequest, response: Response, next: NextFunction) {
+async function requireAuth(request: AuthRequest, response: Response, next: NextFunction) {
   const token = request.headers.authorization?.replace("Bearer ", "");
   if (!token) return response.status(401).json({ error: "Authentication required" });
   try {
-    const payload = jwt.verify(token, jwtSecret) as { sub: string; role: Role };
-    request.actor = { id: payload.sub, role: payload.role };
+    request.actor = await verifyAccessToken(token);
     return next();
   } catch { return response.status(401).json({ error: "Invalid or expired token" }); }
 }
@@ -64,7 +64,7 @@ function requireExecutive(request: AuthRequest, response: Response, next: NextFu
 
 app.get("/health", async (_request, response) => {
   const result = await pool.query("select 1 as healthy");
-  response.json({ status: "ok", database: result.rows[0].healthy === 1 });
+  response.json({ status: "ok", database: result.rows[0].healthy === 1, providers: { auth: authProviderStatus(), email: emailProviderStatus(), mux: muxProviderStatus(), coinbase: coinbaseProviderStatus(), stripe: isStripeConfigured() ? "stripe" : "unconfigured" } });
 });
 
 app.get("/v1/summary", requireAuth, requireStaff, async (_request, response) => {
@@ -95,6 +95,13 @@ app.post("/v1/uploads/presign", requireAuth, async (request: AuthRequest, respon
   const key = `${purpose}/${request.actor?.id}/${crypto.randomUUID()}-${safeName}`;
   const uploadUrl = await getSignedUrl(s3Client, new PutObjectCommand({ Bucket: mediaBucket, Key: key, ContentType: contentType }), { expiresIn: 900 });
   response.json({ key, uploadUrl, publicUrl: `${mediaPublicBaseUrl.replace(/\/$/, "")}/${key}`, expiresIn: 900 });
+});
+
+app.post("/v1/videos/upload-url", requireAuth, async (request: AuthRequest, response) => {
+  const { origin } = request.body as { origin?: string };
+  const allowedOrigin = origins.includes(origin ?? "") ? origin! : origins[0];
+  if (!allowedOrigin) return response.status(400).json({ error: "A configured CORS origin is required" });
+  try { response.json(await createMuxDirectUpload({ corsOrigin: allowedOrigin, passthrough: request.actor?.id ?? "" })); } catch (error) { response.status(503).json({ error: error instanceof Error ? error.message : "Video provider unavailable" }); }
 });
 
 app.get("/v1/portfolios/me", requireAuth, async (request: AuthRequest, response) => {
@@ -265,7 +272,15 @@ app.post("/v1/crypto/trades", requireAuth, async (request: AuthRequest, response
   if (!asset.rowCount) return response.status(404).json({ error: "Crypto asset not found" });
   const result = await pool.query("insert into crypto_trades (user_id, asset_id, side, quantity, quote_currency, unit_price_cents, status, provider) values ($1, $2, $3, $4, $5, 0, 'pending', 'unconfigured') returning id, asset_id, side, quantity, quote_currency, status, created_at", [request.actor?.id, assetId, side, quantity, quoteCurrency]);
   await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id, metadata) values ($1, 'crypto-trade.requested', 'crypto_trade', $2, $3)", [request.actor?.id, result.rows[0].id, JSON.stringify({ assetId, side, quantity, quoteCurrency })]);
-  response.status(201).json({ ...result.rows[0], message: "Trade intent recorded; connect a regulated exchange provider before execution." });
+  const assetDetails = await pool.query("select symbol from crypto_assets where id = $1", [assetId]);
+  if (coinbaseProviderStatus().provider !== "unconfigured" && assetDetails.rowCount) {
+    try {
+      const execution = await createCoinbaseMarketOrder({ symbol: assetDetails.rows[0].symbol, side: side!, quantity, quoteCurrency });
+      await pool.query("update crypto_trades set status = 'filled', provider = 'coinbase', provider_reference = $1, updated_at = now() where id = $2", [execution.orderId, result.rows[0].id]);
+      return response.status(201).json({ ...result.rows[0], status: "filled", provider: "coinbase", providerReference: execution.orderId });
+    } catch (error) { await pool.query("update crypto_trades set provider = 'coinbase', updated_at = now() where id = $1", [result.rows[0].id]); return response.status(502).json({ error: error instanceof Error ? error.message : "Crypto provider unavailable", tradeId: result.rows[0].id }); }
+  }
+  response.status(202).json({ ...result.rows[0], message: "Trade intent recorded; connect a regulated exchange provider before execution." });
 });
 
 app.get("/v1/workers", requireAuth, requireStaff, async (_request, response) => {
@@ -278,6 +293,7 @@ app.post("/v1/workers", requireAuth, requireExecutive, async (request: AuthReque
   if (!displayName || !email || !["worker", "executive"].includes(role)) return response.status(400).json({ error: "displayName, email, and a valid staff role are required" });
   const result = await pool.query("insert into users (display_name, email, role, status) values ($1, $2, $3, 'invited') returning id, display_name, email, role, status", [displayName, email, role]);
   await pool.query("insert into audit_events (actor_id, action, entity_type, entity_id, metadata) values ($1, 'worker.invited', 'user', $2, $3)", [request.actor?.id, result.rows[0].id, JSON.stringify({ email, role })]);
+  await sendTransactionalEmail({ to: email, subject: "You have been invited to Ditrine Control", html: `<p>Hello ${displayName},</p><p>You have been invited to join Ditrine as a ${role}. Complete your account setup through your organization's identity provider.</p>` });
   response.status(201).json(result.rows[0]);
 });
 

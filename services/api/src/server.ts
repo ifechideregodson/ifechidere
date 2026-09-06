@@ -3,6 +3,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import helmet from "helmet";
 import jwt from "jsonwebtoken";
 import pg from "pg";
+import { createCheckoutSession, isStripeConfigured, verifyStripeSignature } from "./stripe.js";
 
 const { Pool } = pg;
 const app = express();
@@ -15,9 +16,21 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
 const pool = new Pool({ connectionString: databaseUrl, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
 const origins = (process.env.CORS_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 app.use(helmet());
 app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
+app.post("/v1/payments/stripe-webhook", express.raw({ type: "application/json" }), async (request, response) => {
+  if (!stripeWebhookSecret || !verifyStripeSignature(request.body as Buffer, request.headers["stripe-signature"] ?? "", stripeWebhookSecret)) return response.status(400).json({ error: "Invalid Stripe signature" });
+  const event = JSON.parse((request.body as Buffer).toString("utf8")) as { id?: string; type?: string; data?: { object?: { metadata?: { order_id?: string }; payment_status?: string } } };
+  const orderId = event.data?.object?.metadata?.order_id;
+  if (event.type === "checkout.session.completed" && orderId && event.data?.object?.payment_status === "paid") {
+    await pool.query("update orders set status = 'paid', payment_provider = 'stripe', payment_reference = $1, updated_at = now() where id = $2", [event.id ?? event.type, orderId]);
+    await pool.query("update shipments set status = 'processing', updated_at = now() where order_id = $1", [orderId]);
+    await pool.query("insert into audit_events (action, entity_type, entity_id, metadata) values ('payment.completed', 'order', $1, $2)", [orderId, JSON.stringify({ provider: "stripe", eventType: event.type })]);
+  }
+  response.json({ received: true });
+});
 app.use(express.json({ limit: "1mb" }));
 
 type Role = "executive" | "worker" | "user";
@@ -127,6 +140,17 @@ app.post("/v1/orders", requireAuth, async (request: AuthRequest, response) => {
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 });
 
+app.post("/v1/orders/:orderId/checkout", requireAuth, async (request: AuthRequest, response) => {
+  if (!isStripeConfigured()) return response.status(503).json({ error: "Payments are not configured" });
+  const { successUrl, cancelUrl } = request.body as { successUrl?: string; cancelUrl?: string };
+  if (!successUrl || !cancelUrl || !/^https?:\/\//.test(successUrl) || !/^https?:\/\//.test(cancelUrl)) return response.status(400).json({ error: "Valid successUrl and cancelUrl are required" });
+  const order = await pool.query("select o.id, o.total_cents, o.currency, u.email, coalesce(string_agg(oi.product_name, ', '), 'Ditrine order') as product_name from orders o join users u on u.id = o.buyer_id left join order_items oi on oi.order_id = o.id where o.id = $1 and o.buyer_id = $2 and o.status = 'pending' group by o.id, u.email", [request.params.orderId, request.actor?.id]);
+  if (!order.rowCount) return response.status(404).json({ error: "Pending order not found" });
+  const session = await createCheckoutSession({ orderId: order.rows[0].id, amountCents: order.rows[0].total_cents, currency: order.rows[0].currency, productName: order.rows[0].product_name, successUrl, cancelUrl, customerEmail: order.rows[0].email });
+  await pool.query("update orders set payment_provider = 'stripe', payment_reference = $1, updated_at = now() where id = $2", [session.id, order.rows[0].id]);
+  response.json(session);
+});
+
 app.get("/v1/products", async (_request, response) => {
   const result = await pool.query("select id, sku, name, description, price_cents, inventory_count from products where is_active = true and inventory_count > 0 order by created_at desc");
   response.json(result.rows);
@@ -149,9 +173,9 @@ app.post("/v1/store-orders", requireAuth, async (request: AuthRequest, response)
     const product = await client.query("update products set inventory_count = inventory_count - $1 where id = $2 and is_active = true and inventory_count >= $1 returning id, name, price_cents", [quantity, productId]);
     if (!product.rowCount) { await client.query("rollback"); return response.status(409).json({ error: "Product is unavailable or inventory is insufficient" }); }
     const item = product.rows[0];
-    const order = await client.query("insert into orders (buyer_id, status, total_cents, currency, shipping_address) values ($1, 'paid', $2, 'USD', $3) returning id, status, total_cents, currency, created_at", [request.actor?.id, item.price_cents * quantity, shippingAddress ?? null]);
+    const order = await client.query("insert into orders (buyer_id, status, total_cents, currency, shipping_address) values ($1, 'pending', $2, 'USD', $3) returning id, status, total_cents, currency, created_at", [request.actor?.id, item.price_cents * quantity, shippingAddress ?? null]);
     await client.query("insert into order_items (order_id, product_name, quantity, unit_price_cents) values ($1, $2, $3, $4)", [order.rows[0].id, item.name, quantity, item.price_cents]);
-    await client.query("insert into shipments (order_id, status) values ($1, 'processing')", [order.rows[0].id]);
+    await client.query("insert into shipments (order_id, status) values ($1, 'pending')", [order.rows[0].id]);
     await client.query("insert into audit_events (actor_id, action, entity_type, entity_id, metadata) values ($1, 'store-order.created', 'order', $2, $3)", [request.actor?.id, order.rows[0].id, JSON.stringify({ productId, quantity })]);
     await client.query("commit");
     response.status(201).json(order.rows[0]);

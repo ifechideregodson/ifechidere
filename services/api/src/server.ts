@@ -10,6 +10,9 @@ import { authProviderStatus, verifyAccessToken } from "./providers-auth.js";
 import { coinbaseProviderStatus, createCoinbaseMarketOrder } from "./providers-coinbase.js";
 import { emailProviderStatus, sendTransactionalEmail } from "./providers-email.js";
 import { createMuxDirectUpload, muxProviderStatus } from "./providers-mux.js";
+import { cloudinaryProviderStatus, createCloudinarySignature } from "./providers-cloudinary.js";
+import { initializePaystack, paystackProviderStatus, verifyPaystackSignature } from "./providers-paystack.js";
+import { flutterwaveProviderStatus, initializeFlutterwave, verifyFlutterwaveWebhook } from "./providers-flutterwave.js";
 
 const { Pool } = pg;
 const app = express();
@@ -21,9 +24,16 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const pool = new Pool({ connectionString: databaseUrl, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
 const origins = (process.env.CORS_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const paymentProvider = process.env.PAYMENT_PROVIDER ?? "stripe";
 const mediaBucket = process.env.S3_BUCKET;
 const mediaPublicBaseUrl = process.env.MEDIA_PUBLIC_BASE_URL;
 const s3Client = process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY && mediaBucket ? new S3Client({ region: process.env.S3_REGION ?? "us-east-1", endpoint: process.env.S3_ENDPOINT, forcePathStyle: Boolean(process.env.S3_ENDPOINT), credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } }) : null;
+
+async function markOrderPaid(orderId: string, provider: string, reference?: string) {
+  await pool.query("update orders set status = 'paid', payment_provider = $1, payment_reference = $2, updated_at = now() where id = $3", [provider, reference ?? null, orderId]);
+  await pool.query("update shipments set status = 'processing', updated_at = now() where order_id = $1", [orderId]);
+  await pool.query("insert into audit_events (action, entity_type, entity_id, metadata) values ('payment.completed', 'order', $1, $2)", [orderId, JSON.stringify({ provider, reference })]);
+}
 
 app.use(helmet());
 app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
@@ -36,6 +46,20 @@ app.post("/v1/payments/stripe-webhook", express.raw({ type: "application/json" }
     await pool.query("update shipments set status = 'processing', updated_at = now() where order_id = $1", [orderId]);
     await pool.query("insert into audit_events (action, entity_type, entity_id, metadata) values ('payment.completed', 'order', $1, $2)", [orderId, JSON.stringify({ provider: "stripe", eventType: event.type })]);
   }
+  response.json({ received: true });
+});
+app.post("/v1/payments/paystack-webhook", express.raw({ type: "application/json" }), async (request, response) => {
+  if (!verifyPaystackSignature(request.body as Buffer, request.headers["x-paystack-signature"] ?? "")) return response.status(400).json({ error: "Invalid Paystack signature" });
+  const event = JSON.parse((request.body as Buffer).toString("utf8")) as { event?: string; data?: { status?: string; reference?: string; metadata?: { order_id?: string } } };
+  const orderId = event.data?.metadata?.order_id;
+  if (event.event === "charge.success" && event.data?.status === "success" && orderId) await markOrderPaid(orderId, "paystack", event.data.reference);
+  response.json({ received: true });
+});
+app.post("/v1/payments/flutterwave-webhook", express.raw({ type: "application/json" }), async (request, response) => {
+  if (!verifyFlutterwaveWebhook(String(request.headers["verif-hash"] ?? ""))) return response.status(400).json({ error: "Invalid Flutterwave signature" });
+  const event = JSON.parse((request.body as Buffer).toString("utf8")) as { data?: { status?: string; id?: string; meta?: { order_id?: string } } };
+  const orderId = event.data?.meta?.order_id;
+  if (event.data?.status === "successful" && orderId) await markOrderPaid(orderId, "flutterwave", event.data.id);
   response.json({ received: true });
 });
 app.use(express.json({ limit: "1mb" }));
@@ -64,7 +88,7 @@ function requireExecutive(request: AuthRequest, response: Response, next: NextFu
 
 app.get("/health", async (_request, response) => {
   const result = await pool.query("select 1 as healthy");
-  response.json({ status: "ok", database: result.rows[0].healthy === 1, providers: { auth: authProviderStatus(), email: emailProviderStatus(), mux: muxProviderStatus(), coinbase: coinbaseProviderStatus(), stripe: isStripeConfigured() ? "stripe" : "unconfigured" } });
+  response.json({ status: "ok", database: result.rows[0].healthy === 1, providers: { auth: authProviderStatus(), email: emailProviderStatus(), mux: muxProviderStatus(), cloudinary: cloudinaryProviderStatus(), coinbase: coinbaseProviderStatus(), stripe: isStripeConfigured() ? "stripe" : "unconfigured", paystack: paystackProviderStatus(), flutterwave: flutterwaveProviderStatus(), paymentProvider } });
 });
 
 app.get("/v1/summary", requireAuth, requireStaff, async (_request, response) => {
@@ -95,6 +119,12 @@ app.post("/v1/uploads/presign", requireAuth, async (request: AuthRequest, respon
   const key = `${purpose}/${request.actor?.id}/${crypto.randomUUID()}-${safeName}`;
   const uploadUrl = await getSignedUrl(s3Client, new PutObjectCommand({ Bucket: mediaBucket, Key: key, ContentType: contentType }), { expiresIn: 900 });
   response.json({ key, uploadUrl, publicUrl: `${mediaPublicBaseUrl.replace(/\/$/, "")}/${key}`, expiresIn: 900 });
+});
+
+app.post("/v1/uploads/cloudinary-signature", requireAuth, async (request: AuthRequest, response) => {
+  const { purpose = "portfolio" } = request.body as { purpose?: "portfolio" | "video" | "avatar" };
+  if (!purpose || !["portfolio", "video", "avatar"].includes(purpose)) return response.status(400).json({ error: "A valid upload purpose is required" });
+  try { response.json(createCloudinarySignature({ purpose })); } catch (error) { response.status(503).json({ error: error instanceof Error ? error.message : "Cloudinary unavailable" }); }
 });
 
 app.post("/v1/videos/upload-url", requireAuth, async (request: AuthRequest, response) => {
@@ -165,11 +195,14 @@ app.post("/v1/orders", requireAuth, async (request: AuthRequest, response) => {
 });
 
 app.post("/v1/orders/:orderId/checkout", requireAuth, async (request: AuthRequest, response) => {
-  if (!isStripeConfigured()) return response.status(503).json({ error: "Payments are not configured" });
+  if (!["stripe", "paystack", "flutterwave"].includes(paymentProvider)) return response.status(503).json({ error: "Unsupported payment provider" });
   const { successUrl, cancelUrl } = request.body as { successUrl?: string; cancelUrl?: string };
   if (!successUrl || !cancelUrl || !/^https?:\/\//.test(successUrl) || !/^https?:\/\//.test(cancelUrl)) return response.status(400).json({ error: "Valid successUrl and cancelUrl are required" });
   const order = await pool.query("select o.id, o.total_cents, o.currency, u.email, coalesce(string_agg(oi.product_name, ', '), 'Ditrine order') as product_name from orders o join users u on u.id = o.buyer_id left join order_items oi on oi.order_id = o.id where o.id = $1 and o.buyer_id = $2 and o.status = 'pending' group by o.id, u.email", [request.params.orderId, request.actor?.id]);
   if (!order.rowCount) return response.status(404).json({ error: "Pending order not found" });
+  if (paymentProvider === "paystack") { const checkout = await initializePaystack({ email: order.rows[0].email, amountCents: order.rows[0].total_cents, currency: order.rows[0].currency, callbackUrl: successUrl, orderId: order.rows[0].id }); await pool.query("update orders set payment_provider = 'paystack', payment_reference = $1, updated_at = now() where id = $2", [checkout.reference, order.rows[0].id]); return response.json(checkout); }
+  if (paymentProvider === "flutterwave") { const checkout = await initializeFlutterwave({ email: order.rows[0].email, amountCents: order.rows[0].total_cents, currency: order.rows[0].currency, callbackUrl: successUrl, orderId: order.rows[0].id }); await pool.query("update orders set payment_provider = 'flutterwave', updated_at = now() where id = $1", [order.rows[0].id]); return response.json(checkout); }
+  if (!isStripeConfigured()) return response.status(503).json({ error: "Stripe is not configured" });
   const session = await createCheckoutSession({ orderId: order.rows[0].id, amountCents: order.rows[0].total_cents, currency: order.rows[0].currency, productName: order.rows[0].product_name, successUrl, cancelUrl, customerEmail: order.rows[0].email });
   await pool.query("update orders set payment_provider = 'stripe', payment_reference = $1, updated_at = now() where id = $2", [session.id, order.rows[0].id]);
   response.json(session);
